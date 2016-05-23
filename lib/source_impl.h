@@ -90,6 +90,7 @@ public:
   void set_time_now(const ::osmosdr::time_spec_t &time_spec, size_t mboard = 0);
   void set_time_next_pps(const ::osmosdr::time_spec_t &time_spec);
   void set_time_unknown_pps(const ::osmosdr::time_spec_t &time_spec);
+  int ioctl(const std::string & request, uint64_t arg0, uint64_t arg1);
 
 private:
   std::vector< source_iface * > _devs;

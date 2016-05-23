@@ -966,3 +966,11 @@ void source_impl::set_time_unknown_pps(const osmosdr::time_spec_t &time_spec)
     dev->set_time_unknown_pps( time_spec );
   }
 }
+
+int source_impl::ioctl(const std::string & request, uint64_t arg0, uint64_t arg1) {
+  BOOST_FOREACH( source_iface *dev, _devs )
+  {
+    return dev->ioctl(request, arg0, arg1);
+  }
+  return 0;
+}

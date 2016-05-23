@@ -445,7 +445,8 @@ void bladerf_common::init(dict_t &dict, bladerf_module module)
       _stream_timeout_ms = boost::lexical_cast< unsigned int >(dict["stream_timeout_ms"] );
   }
 
-  _use_metadata = dict.count("enable_metadata") != 0;
+  //_use_metadata = dict.count("enable_metadata") != 0;
+  _use_metadata = true;
 
   /* Require value to be >= 2 so we can ensure we have twice as many
    * buffers as transfers */

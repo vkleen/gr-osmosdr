@@ -62,6 +62,8 @@ private:
   // The friend declaration allows bladerf_make_source_c to
   // access the private constructor.
   friend bladerf_source_c_sptr make_bladerf_source_c (const std::string & args);
+  void run_quick_tune( double freq, int num);
+  void schedule_another( );
 
   bladerf_source_c (const std::string & args);  	// private constructor
 
@@ -117,6 +119,8 @@ public:
   std::string get_clock_source(const size_t mboard);
   std::vector<std::string> get_clock_sources(const size_t mboard);
 
+
+  int ioctl(const std::string & request = "", uint64_t arg0 = 0, uint64_t arg1 = 0);
 private:
   osmosdr::gain_range_t _lna_range;
 };

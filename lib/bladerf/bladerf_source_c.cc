@@ -65,6 +65,83 @@ static const int MAX_IN = 0;	// maximum number of input streams
 static const int MIN_OUT = 1;	// minimum number of output streams
 static const int MAX_OUT = 1;	// maximum number of output streams
 
+#define NUM_FREQUENCIES 40
+unsigned int frequencies[NUM_FREQUENCIES];
+struct bladerf_quick_tune quick_tunes[NUM_FREQUENCIES];
+uint64_t lst;
+int last_schedule_bin;
+
+typedef struct {
+    int freq;
+    int bin;
+    uint64_t time;
+    int left;
+} tune_time_t ;
+std::queue<tune_time_t> q_ttt;
+
+bool ssa_mode = false;
+#define NUM_SAMPLE 32768
+#define SETTLE 400
+#define GUARD (SETTLE+400)
+void bladerf_source_c::schedule_another() {
+    uint64_t wtitn;
+    tune_time_t tune_new;
+
+    std::cout << "W1" << std::endl;
+    tune_new.time = lst + (NUM_SAMPLE + SETTLE);
+    lst = tune_new.time + NUM_SAMPLE + GUARD;
+
+    std::cout << "W2" << std::endl;
+    bladerf_get_timestamp(_dev.get(), BLADERF_MODULE_RX, &wtitn);
+    std::cout << "[" << wtitn << "] ENQUUED TIME " << tune_new.time << std::endl;
+    tune_new.bin = last_schedule_bin++;
+    std::cout << "W3" << std::endl;
+    if (last_schedule_bin == 3)
+        last_schedule_bin = 0 ;
+
+    tune_new.left = NUM_SAMPLE;
+    std::cout << "W4" << std::endl;
+
+    q_ttt.push(tune_new);
+
+    std::cout << "W5" << std::endl;
+    //std::cout << "RET = " << bladerf_schedule_retune(_dev.get(), BLADERF_MODULE_RX, tune_new.time, 0, &quick_tunes[tune_new.bin]) << std::endl;
+    std::cout << "RET = " << bladerf_schedule_retune(_dev.get(), BLADERF_MODULE_RX, tune_new.time, frequencies[tune_new.bin], NULL) << std::endl;
+}
+
+void bladerf_source_c::run_quick_tune( double freq, int num ) {
+    int status;
+    int i;
+    uint32_t left, right;
+    left = right = (uint32_t)freq;
+    frequencies[0] = (uint32_t)freq;
+    for (i = 1; i < num; i++) {
+        if (i & 1) {
+            // odd = left
+            left -= 14000000;
+            frequencies[i] = left;
+        } else {
+            // even = right
+            right += 14000000;
+            frequencies[i] = right;
+        }
+    }
+    for (i = 0; i < num; i++) {
+        status = bladerf_set_frequency(_dev.get(), BLADERF_MODULE_RX, frequencies[i]);
+        if (status != 0) {
+            throw std::runtime_error( std::string(__FUNCTION__) + " " +
+                    //"Failed to set frequency to " + frequencies[i] + " Hz: "+
+                    bladerf_strerror(status));
+        }
+        status = bladerf_get_quick_tune(_dev.get(), BLADERF_MODULE_RX, &quick_tunes[i]);
+        if (status != 0) {
+            throw std::runtime_error( std::string(__FUNCTION__) + " " +
+                    //"Failed to get quick tune for " + frequencies[i] + " Hz: "+
+                    bladerf_strerror(status));
+        }
+    }
+}
+
 /*
  * The private constructor
  */
@@ -126,18 +203,31 @@ bladerf_source_c::bladerf_source_c (const std::string &args)
 
 bool bladerf_source_c::start()
 {
+  //bladerf_get_timestamp(_dev.get(), BLADERF_MODULE_RX, &lst);
+  lst = 100000;
+  schedule_another();
+  schedule_another();
+  schedule_another();
+  schedule_another();
+  schedule_another();
+  schedule_another();
   return bladerf_common::start(BLADERF_MODULE_RX);
 }
 
 bool bladerf_source_c::stop()
 {
-  return bladerf_common::stop(BLADERF_MODULE_RX);
+  bool ret = bladerf_common::stop(BLADERF_MODULE_RX);
+  while (!q_ttt.empty())
+      q_ttt.pop();
+  return ret;
 }
 
 int bladerf_source_c::work( int noutput_items,
                             gr_vector_const_void_star &input_items,
                             gr_vector_void_star &output_items )
 {
+    static int fuck = 0 ;
+    static uint64_t last = 0 ;
   int ret;
   int16_t *current;
   const float scaling = 1.0f / 2048.0f;
@@ -160,13 +250,45 @@ int bladerf_source_c::work( int noutput_items,
 
   if (_use_metadata) {
     memset(&meta, 0, sizeof(meta));
-    meta.flags = BLADERF_META_FLAG_RX_NOW;
+    if (q_ttt.empty() || !ssa_mode) {
+        meta.flags = BLADERF_META_FLAG_RX_NOW;
+        std::cout << "SET TIME TO : ASAP" << std::endl;
+    } else {
+        meta.timestamp=q_ttt.front().time;
+        std::cout << "SET TIME TO : " << meta.timestamp << std::endl;
+    }
     meta_ptr = &meta;
   }
 
   /* Grab all the samples into the temporary buffer */
+  std::cout << "I WANT TO READ AT " << meta_ptr->timestamp << std::endl;
   ret = bladerf_sync_rx(_dev.get(), static_cast<void *>(_conv_buf),
                         noutput_items, meta_ptr, _stream_timeout_ms);
+  std::cout << "Q1" << std::endl;
+  if(ssa_mode) {
+    if( ret == BLADERF_ERR_TIME_PAST ) {
+        std::cout << "Q2" << std::endl;
+      while (!q_ttt.empty())
+        q_ttt.pop();
+      bladerf_get_timestamp(_dev.get(), BLADERF_MODULE_RX, &lst);
+      lst += 20000;
+      schedule_another();
+      schedule_another();
+      schedule_another();
+      return 0;
+    }
+    std::cout << "Q3 " << q_ttt.empty() << std::endl;
+    add_item_tag(0, nitems_written(0), pmt::intern("bin"), pmt::from_long(q_ttt.front().bin));
+    std::cout << "Q3.0" << std::endl;
+    if (!q_ttt.empty())
+        q_ttt.pop();
+    std::cout << "Q3.1" << std::endl;
+    schedule_another();
+    std::cout << "Q3.2" << std::endl;
+    std::cout << meta_ptr->timestamp << " [" << (meta_ptr->timestamp - last) << "] " << noutput_items << " " << ret << std::endl;
+    last = meta_ptr->timestamp;
+    std::cout << "Q4" << std::endl;
+  }
   if ( ret != 0 ) {
     std::cerr << _pfx << "bladerf_sync_rx error: "
               << bladerf_strerror(ret) << std::endl;
@@ -219,6 +341,7 @@ osmosdr::meta_range_t bladerf_source_c::get_sample_rates()
 
 double bladerf_source_c::set_sample_rate( double rate )
 {
+  std::cout << " SET SAMPLE " << rate << std::endl;
   return bladerf_common::set_sample_rate( BLADERF_MODULE_RX, rate);
 }
 
@@ -248,6 +371,7 @@ double bladerf_source_c::set_center_freq( double freq, size_t chan )
                                 boost::lexical_cast<std::string>(freq) + ": " +
                                 std::string(bladerf_strerror(ret)) );
     }
+    run_quick_tune( freq, 3 );
   }
 
   return get_center_freq( chan );
@@ -551,4 +675,30 @@ std::string bladerf_source_c::get_clock_source(const size_t mboard)
 std::vector<std::string> bladerf_source_c::get_clock_sources(const size_t mboard)
 {
   return bladerf_common::get_clock_sources(mboard);
+}
+
+#include <stdio.h>
+#define MHZ 1000000
+int bladerf_source_c::ioctl(const std::string & request, uint64_t arg0, uint64_t arg1 ) {
+  int ret = 0;
+  if( request == "ssa_support" ) {
+    ret = 1;
+    if( arg0 )
+      *(int *)arg0 = 40 * MHZ;
+  } else if( request == "set_ssa_sample_rate" ) {
+    if( arg0 ) {
+      if( bladerf_common::set_sample_rate( BLADERF_MODULE_RX, 40*MHZ) == 40*MHZ ) {
+        ret = arg0;
+        run_quick_tune(get_center_freq(0), 3);
+      } else {
+        ret = -1;
+      }
+      ssa_mode = true;
+    } else {
+      ssa_mode = false;
+    }
+  } else if ( request == "get_ssa_config" ) {
+  }
+
+  return ret;
 }

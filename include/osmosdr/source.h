@@ -415,6 +415,15 @@ public:
    * \param time_spec the new time
    */
   virtual void set_time_unknown_pps(const ::osmosdr::time_spec_t &time_spec) = 0;
+
+  /*!
+   * ioctl() like function for controlling device specific attributes
+   * \param request the request id
+   * \param arg0 argument 0
+   * \param arg1 argument 1
+   * \return 0 on error
+   */
+  virtual int ioctl(const std::string & request = "", uint64_t arg0 = 0, uint64_t arg1 = 0) = 0;
 };
 
 } /* namespace osmosdr */
