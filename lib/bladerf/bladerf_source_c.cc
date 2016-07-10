@@ -87,26 +87,19 @@ void bladerf_source_c::schedule_another() {
     uint64_t wtitn;
     tune_time_t tune_new;
 
-    std::cout << "W1" << std::endl;
     tune_new.time = lst + (NUM_SAMPLE + SETTLE);
     lst = tune_new.time + NUM_SAMPLE + GUARD;
 
-    std::cout << "W2" << std::endl;
     bladerf_get_timestamp(_dev.get(), BLADERF_MODULE_RX, &wtitn);
-    std::cout << "[" << wtitn << "] ENQUUED TIME " << tune_new.time << std::endl;
     tune_new.bin = last_schedule_bin++;
-    std::cout << "W3" << std::endl;
     if (last_schedule_bin == 3)
         last_schedule_bin = 0 ;
 
     tune_new.left = NUM_SAMPLE;
-    std::cout << "W4" << std::endl;
 
     q_ttt.push(tune_new);
+    bladerf_schedule_retune(_dev.get(), BLADERF_MODULE_RX, tune_new.time, frequencies[tune_new.bin], NULL);
 
-    std::cout << "W5" << std::endl;
-    //std::cout << "RET = " << bladerf_schedule_retune(_dev.get(), BLADERF_MODULE_RX, tune_new.time, 0, &quick_tunes[tune_new.bin]) << std::endl;
-    std::cout << "RET = " << bladerf_schedule_retune(_dev.get(), BLADERF_MODULE_RX, tune_new.time, frequencies[tune_new.bin], NULL) << std::endl;
 }
 
 void bladerf_source_c::run_quick_tune( double freq, int num ) {
@@ -226,7 +219,6 @@ int bladerf_source_c::work( int noutput_items,
                             gr_vector_const_void_star &input_items,
                             gr_vector_void_star &output_items )
 {
-    static int fuck = 0 ;
     static uint64_t last = 0 ;
   int ret;
   int16_t *current;
@@ -252,22 +244,17 @@ int bladerf_source_c::work( int noutput_items,
     memset(&meta, 0, sizeof(meta));
     if (q_ttt.empty() || !ssa_mode) {
         meta.flags = BLADERF_META_FLAG_RX_NOW;
-        std::cout << "SET TIME TO : ASAP" << std::endl;
     } else {
         meta.timestamp=q_ttt.front().time;
-        std::cout << "SET TIME TO : " << meta.timestamp << std::endl;
     }
     meta_ptr = &meta;
   }
 
   /* Grab all the samples into the temporary buffer */
-  std::cout << "I WANT TO READ AT " << meta_ptr->timestamp << std::endl;
   ret = bladerf_sync_rx(_dev.get(), static_cast<void *>(_conv_buf),
                         noutput_items, meta_ptr, _stream_timeout_ms);
-  std::cout << "Q1" << std::endl;
   if(ssa_mode) {
     if( ret == BLADERF_ERR_TIME_PAST ) {
-        std::cout << "Q2" << std::endl;
       while (!q_ttt.empty())
         q_ttt.pop();
       bladerf_get_timestamp(_dev.get(), BLADERF_MODULE_RX, &lst);
@@ -277,17 +264,11 @@ int bladerf_source_c::work( int noutput_items,
       schedule_another();
       return 0;
     }
-    std::cout << "Q3 " << q_ttt.empty() << std::endl;
     add_item_tag(0, nitems_written(0), pmt::intern("bin"), pmt::from_long(q_ttt.front().bin));
-    std::cout << "Q3.0" << std::endl;
     if (!q_ttt.empty())
         q_ttt.pop();
-    std::cout << "Q3.1" << std::endl;
     schedule_another();
-    std::cout << "Q3.2" << std::endl;
-    std::cout << meta_ptr->timestamp << " [" << (meta_ptr->timestamp - last) << "] " << noutput_items << " " << ret << std::endl;
     last = meta_ptr->timestamp;
-    std::cout << "Q4" << std::endl;
   }
   if ( ret != 0 ) {
     std::cerr << _pfx << "bladerf_sync_rx error: "
@@ -341,7 +322,6 @@ osmosdr::meta_range_t bladerf_source_c::get_sample_rates()
 
 double bladerf_source_c::set_sample_rate( double rate )
 {
-  std::cout << " SET SAMPLE " << rate << std::endl;
   return bladerf_common::set_sample_rate( BLADERF_MODULE_RX, rate);
 }
 
